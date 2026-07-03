@@ -9,9 +9,16 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase
+      - name: Ping Gallery Supabase
         run: |
-          curl -s -o /dev/null -w "%{http_code}" \
+          curl -s -o /dev/null -w "Gallery: %{http_code}\n" \
             "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/apps?limit=1" \
             -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
             -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}"
+
+      - name: Ping Andamiro Supabase
+        run: |
+          curl -s -o /dev/null -w "Andamiro: %{http_code}\n" \
+            "${{ secrets.ANDAMIRO_SUPABASE_URL }}/rest/v1/emotions?limit=1" \
+            -H "apikey: ${{ secrets.ANDAMIRO_SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.ANDAMIRO_SUPABASE_ANON_KEY }}"
