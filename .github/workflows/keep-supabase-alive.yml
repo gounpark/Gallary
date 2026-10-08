@@ -1,24 +1,66 @@
 name: Keep Supabase Alive
 
+# Supabase 무료 플랜은 7일간 활동이 없으면 프로젝트를 일시정지한다.
+# 6일 간격 조회(SELECT)만으로는 정지를 막지 못했기 때문에(2026-06, 07 두 번 정지)
+# 매일 실행하고, Gallery는 실제 쓰기(UPSERT)까지 한다.
+# 실패하면 run이 빨간불(Failure)이 되도록 curl --fail을 쓴다.
+
 on:
   schedule:
-    - cron: '0 9 */6 * *'  # 6일마다 오전 9시
+    - cron: '17 0 * * *'   # 매일 00:17 UTC = 한국 09:17
   workflow_dispatch:        # 수동 실행 가능
 
-jobs:
-  ping:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Ping Gallery Supabase
-        run: |
-          curl -s -o /dev/null -w "Gallery: %{http_code}\n" \
-            "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/apps?limit=1" \
-            -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}"
+permissions:
+  contents: read
 
-      - name: Ping Andamiro Supabase
+jobs:
+  gallery:
+    runs-on: ubuntu-latest
+    env:
+      URL: ${{ secrets.VITE_SUPABASE_URL }}
+      KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Check secrets
         run: |
-          curl -s -o /dev/null -w "Andamiro: %{http_code}\n" \
-            "${{ secrets.ANDAMIRO_SUPABASE_URL }}/rest/v1/emotions?limit=1" \
-            -H "apikey: ${{ secrets.ANDAMIRO_SUPABASE_ANON_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.ANDAMIRO_SUPABASE_ANON_KEY }}"
+          [ -n "$URL" ] || { echo "::error::VITE_SUPABASE_URL secret is empty"; exit 1; }
+          [ -n "$KEY" ] || { echo "::error::VITE_SUPABASE_ANON_KEY secret is empty"; exit 1; }
+
+      - name: Read (SELECT apps)
+        run: |
+          curl -sS --fail-with-body -o /dev/null -w "Gallery read: %{http_code}\n" \
+            "$URL/rest/v1/apps?select=id&limit=1" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+
+      - name: Write (UPSERT heartbeat row)
+        # share_links 테이블에 id='__keepalive__' 행 하나만 계속 덮어쓴다.
+        # target_id가 실제 앱/플로우 id가 아니라서 앱 화면에는 나타나지 않는다.
+        run: |
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          curl -sS --fail-with-body -o /dev/null -w "Gallery write: %{http_code}\n" \
+            -X POST "$URL/rest/v1/share_links?on_conflict=id" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=minimal" \
+            -d "{\"id\":\"__keepalive__\",\"type\":\"keepalive\",\"target_id\":\"__keepalive__\",\"label\":\"keep-supabase-alive workflow\",\"created_at\":\"$NOW\"}"
+
+  andamiro:
+    # Gallery가 실패해도 따로 실행되도록 별도 job으로 분리
+    runs-on: ubuntu-latest
+    env:
+      URL: ${{ secrets.ANDAMIRO_SUPABASE_URL }}
+      KEY: ${{ secrets.ANDAMIRO_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Check secrets
+        run: |
+          [ -n "$URL" ] || { echo "::error::ANDAMIRO_SUPABASE_URL secret is empty"; exit 1; }
+          [ -n "$KEY" ] || { echo "::error::ANDAMIRO_SUPABASE_ANON_KEY secret is empty"; exit 1; }
+
+      - name: Read (SELECT emotions)
+        run: |
+          curl -sS --fail-with-body -o /dev/null -w "Andamiro read: %{http_code}\n" \
+            "$URL/rest/v1/emotions?limit=1" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+
+# 참고: 저장소에 60일간 커밋이 없으면 GitHub가 이 스케줄을 자동으로 끈다(2026-09-01에 꺼졌음).
+# 그래서 Gallery는 Vercel Cron(api/keepalive.js, vercel.json)으로도 매일 쓰기를 한다.
+# 이 워크플로는 실패 알림(메일) 용도를 겸한다.
