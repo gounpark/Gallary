@@ -3,7 +3,7 @@ name: Keep Supabase Alive
 # Supabase 무료 플랜은 7일간 활동이 없으면 프로젝트를 일시정지한다.
 # 6일 간격 조회(SELECT)만으로는 정지를 막지 못했기 때문에(2026-06, 07 두 번 정지)
 # 매일 실행하고, Gallery는 실제 쓰기(UPSERT)까지 한다.
-# 실패하면 run이 빨간불(Failure)이 되도록 curl --fail을 쓴다.
+# 실패하면 run이 빨간불(Failure)이 되고 GitHub 알림 메일이 오도록 curl --fail을 쓴다.
 
 on:
   schedule:
@@ -61,6 +61,22 @@ jobs:
             "$URL/rest/v1/emotions?limit=1" \
             -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
 
-# 참고: 저장소에 60일간 커밋이 없으면 GitHub가 이 스케줄을 자동으로 끈다(2026-09-01에 꺼졌음).
-# 그래서 Gallery는 Vercel Cron(api/keepalive.js, vercel.json)으로도 매일 쓰기를 한다.
-# 이 워크플로는 실패 알림(메일) 용도를 겸한다.
+  keep-repo-active:
+    # 저장소에 60일간 커밋이 없으면 GitHub가 스케줄 실행을 자동으로 끈다(2026-09-01에 꺼졌음).
+    # 마지막 커밋이 45일 넘게 지났으면 빈 커밋을 하나 남겨 스케줄이 꺼지지 않게 한다.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empty commit if repo idle for 45+ days
+        run: |
+          last=$(git log -1 --format=%ct)
+          idle=$(( ($(date +%s) - last) / 86400 ))
+          echo "Days since last commit: $idle"
+          if [ "$idle" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keep scheduled workflow active"
+            git push
+          fi
