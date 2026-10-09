@@ -9,6 +9,9 @@ on:
   schedule:
     - cron: '17 0 * * *'   # 매일 00:17 UTC = 한국 09:17
   workflow_dispatch:        # 수동 실행 가능
+  push:                     # 이 파일을 고쳐 올리면 바로 한 번 실행(검증용)
+    branches: [main]
+    paths: ['.github/workflows/keep-supabase-alive.yml']
 
 permissions:
   contents: read
